@@ -1,8 +1,8 @@
 // ipad_repair/config.js
 // Fill in googleClientId after the one-time Google Cloud setup (README.md).
 export const CONFIG = {
-  version: '2026.10.12-1713',                    // bump on every deploy: refreshes the offline cache
-  googleClientId: '',
+  version: '2026.10.12-1723',                    // bump on every deploy: refreshes the offline cache
+  googleClientId: '228169122143-al91gjm1piilu5naluf1slvj7leia6i2.apps.googleusercontent.com',
   // the exchange folder in your Drive (the workstation writes G:/My Drive/<this>)
   exchangeFolder: 'MORPHISTO repair',
   // read the batches the workstation wrote; create the files the app commits
