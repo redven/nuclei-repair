@@ -1,0 +1,146 @@
+/* ipad_repair/style.css -- dark viewer, large touch targets, landscape and portrait */
+:root {
+  --bg: #14171c;
+  --panel: #1d2128;
+  --panel-2: #262b34;
+  --line: #333a45;
+  --text: #e6e9ee;
+  --muted: #8b93a1;
+  --accent: #3d8bfd;
+  --accent-text: #ffffff;
+  --warn: #c98a2a;
+  --danger: #d9534f;
+  --ok: #3fae6a;
+  --radius: 10px;
+  --tap: 52px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 15px;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); }
+body {
+  overflow: hidden;
+  -webkit-user-select: none; user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.screen { position: fixed; inset: 0; display: flex; flex-direction: column;
+          padding: env(safe-area-inset-top) env(safe-area-inset-right)
+                   env(safe-area-inset-bottom) env(safe-area-inset-left); }
+[hidden] { display: none !important; }
+
+button {
+  min-height: 40px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--panel-2); color: var(--text); font: inherit; cursor: pointer;
+}
+button:active { filter: brightness(1.25); }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text);
+                 font-weight: 600; }
+button.warn { border-color: var(--warn); color: var(--warn); }
+button:disabled { opacity: 0.4; }
+
+/* ---------------------------------------------------------------- splash */
+#splash { align-items: center; justify-content: center; }
+.splash-card { width: min(440px, 90vw); text-align: center; }
+.splash-card h1 { font-size: 28px; margin: 0 0 6px; letter-spacing: 0.2px; }
+.sub { color: var(--muted); margin: 0 0 28px; line-height: 1.45; }
+.progress { display: flex; gap: 10px; align-items: center; justify-content: center;
+            color: var(--muted); min-height: 28px; }
+.spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--line);
+           border-top-color: var(--accent); animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+#btn-signin { margin-top: 22px; min-height: var(--tap); padding: 0 26px; font-size: 16px; }
+.error { color: var(--danger); margin-top: 18px; line-height: 1.4; white-space: pre-wrap; }
+
+/* ---------------------------------------------------------------- bars */
+.bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+       background: var(--panel); border-bottom: 1px solid var(--line); min-height: 60px; }
+.bar h2 { margin: 0 6px; font-size: 18px; }
+.spacer { flex: 1; }
+.title-button { border: none; background: transparent; font-weight: 600; display: flex;
+                gap: 10px; align-items: center; max-width: 42vw; overflow: hidden; }
+#title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge { font-weight: 500; color: var(--muted); font-size: 13px; white-space: nowrap; }
+.outbox { color: var(--warn); font-size: 13px; padding: 0 6px; cursor: pointer; }
+
+/* ---------------------------------------------------------------- batches */
+.cards { padding: 16px; display: grid; gap: 12px; overflow-y: auto;
+         grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); align-content: start; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+        padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; cursor: pointer; }
+.card:active { border-color: var(--accent); }
+.card .name { font-weight: 600; font-size: 16px; word-break: break-all; }
+.card .meta { color: var(--muted); font-size: 13px; }
+.meter { height: 6px; border-radius: 3px; background: var(--panel-2); overflow: hidden; display: flex; }
+.meter .done { background: var(--ok); }
+.meter .skipped { background: var(--warn); }
+.empty { color: var(--muted); padding: 30px; text-align: center; line-height: 1.5; }
+
+/* ---------------------------------------------------------------- editor */
+.workspace { flex: 1; display: grid; grid-template-columns: 84px 1fr 210px; min-height: 0; }
+.tools { background: var(--panel); border-right: 1px solid var(--line); padding: 8px 6px;
+         display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
+.tool { width: 72px; min-height: 58px; padding: 6px 0 4px; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 3px; border-radius: 8px;
+        border: 1px solid transparent; background: transparent; color: var(--text); }
+.tool svg { width: 24px; height: 24px; stroke: currentColor; fill: none; stroke-width: 1.8;
+            stroke-linecap: round; stroke-linejoin: round; }
+.tool span { font-size: 11px; color: var(--muted); }
+.tool.active { background: var(--panel-2); border-color: var(--accent); }
+.tool.active span { color: var(--text); }
+.tools hr { width: 60%; border: none; border-top: 1px solid var(--line); margin: 4px auto; }
+
+.stage { position: relative; min-width: 0; min-height: 0; background: #000; overflow: hidden; }
+#view { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none;
+        cursor: crosshair; }
+.z-label { position: absolute; left: 12px; top: 10px; padding: 3px 8px; border-radius: 6px;
+           background: rgba(20, 23, 28, 0.75); font-size: 13px; color: var(--muted);
+           pointer-events: none; }
+.message { position: absolute; left: 12px; right: 12px; bottom: 12px; padding: 8px 12px;
+           border-radius: 8px; background: rgba(20, 23, 28, 0.85); font-size: 14px;
+           pointer-events: none; opacity: 0; transition: opacity 0.25s; }
+.message.show { opacity: 1; }
+.message.bad { color: #ff9b97; }
+
+.side { background: var(--panel); border-left: 1px solid var(--line); display: flex;
+        min-height: 0; }
+.z-control { width: 56px; display: flex; flex-direction: column; align-items: center; gap: 8px;
+             padding: 10px 0; border-right: 1px solid var(--line); }
+.z-control button { width: 46px; padding: 0; }
+#z { -webkit-appearance: slider-vertical; appearance: slider-vertical; writing-mode: vertical-lr;
+     direction: rtl; flex: 1; width: 40px; }
+.panel { flex: 1; padding: 12px; display: flex; flex-direction: column; gap: 14px;
+         overflow-y: auto; font-size: 13px; color: var(--muted); }
+.panel label { display: flex; flex-direction: column; gap: 6px; }
+.panel label.check { flex-direction: row; align-items: center; gap: 8px; }
+.panel input[type=range] { width: 100%; }
+.panel input[type=checkbox] { width: 20px; height: 20px; }
+.current { display: flex; align-items: center; gap: 10px; color: var(--text); font-size: 15px; }
+.swatch { width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--line); }
+
+/* windows drawer */
+.drawer { position: absolute; top: 60px; left: 90px; width: min(420px, 70vw); max-height: 70vh;
+          background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+          display: flex; flex-direction: column; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5); }
+.drawer-head { display: flex; align-items: center; justify-content: space-between;
+               padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.window-list { overflow-y: auto; padding: 6px; }
+.window-row { display: flex; justify-content: space-between; align-items: center; gap: 10px;
+              padding: 10px; border-radius: 8px; cursor: pointer; }
+.window-row:active, .window-row.current { background: var(--panel-2); }
+.state { font-size: 12px; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--line);
+         color: var(--muted); }
+.state.done { color: var(--ok); border-color: var(--ok); }
+.state.skipped { color: var(--warn); border-color: var(--warn); }
+
+/* portrait: tools along the bottom */
+@media (orientation: portrait) {
+  .workspace { grid-template-columns: 1fr 190px; grid-template-rows: 1fr auto; }
+  .tools { grid-column: 1 / -1; grid-row: 2; flex-direction: row; border-right: none;
+           border-top: 1px solid var(--line); overflow-x: auto; }
+  .tools hr { width: auto; height: 60%; border-top: none; border-left: 1px solid var(--line);
+              margin: auto 4px; }
+  .drawer { left: 12px; }
+}

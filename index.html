@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Nuclei Repair</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="description" content="Repair nuclei segmentation crops with the Apple Pencil; batches exchanged through Google Drive.">
+  <meta name="theme-color" content="#14171c">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Nuclei Repair">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+  <!-- start: Python loading, sign-in -->
+  <section id="splash" class="screen">
+    <div class="splash-card">
+      <h1>Nuclei Repair</h1>
+      <p class="sub">Repair segmentation crops; batches come from and go back to your Drive folder.</p>
+      <div id="progress" class="progress"><span class="spinner"></span><span id="progress-text">Starting</span></div>
+      <button id="btn-signin" class="primary" hidden>Sign in with Google</button>
+      <p id="splash-error" class="error" hidden></p>
+    </div>
+  </section>
+
+  <!-- batches -->
+  <section id="batches" class="screen" hidden>
+    <header class="bar">
+      <h2>Batches</h2>
+      <span class="spacer"></span>
+      <span id="outbox-batches" class="outbox" hidden></span>
+      <button id="btn-refresh">Refresh</button>
+    </header>
+    <div id="batch-list" class="cards"></div>
+  </section>
+
+  <!-- editor -->
+  <section id="editor" class="screen" hidden>
+    <header class="bar">
+      <button id="btn-back" aria-label="Batches">Batches</button>
+      <button id="btn-windows" class="title-button"><span id="title">-</span><span id="progress-badge" class="badge"></span></button>
+      <span class="spacer"></span>
+      <span id="outbox" class="outbox" hidden></span>
+      <button id="btn-prev" aria-label="Previous crop">Prev</button>
+      <button id="btn-next" aria-label="Next crop">Next</button>
+      <button id="btn-skip" class="warn">Skip</button>
+      <button id="btn-commit" class="primary">Commit</button>
+    </header>
+
+    <div class="workspace">
+      <nav id="tools" class="tools" aria-label="Tools"></nav>
+
+      <div class="stage">
+        <canvas id="view"></canvas>
+        <div id="z-label" class="z-label">z 0 / 0</div>
+        <div id="message" class="message"></div>
+      </div>
+
+      <aside class="side">
+        <div class="z-control">
+          <button id="btn-zup" aria-label="Z up">Z+</button>
+          <input id="z" type="range" min="0" max="0" value="0" orient="vertical" aria-label="Z plane">
+          <button id="btn-zdown" aria-label="Z down">Z-</button>
+        </div>
+        <div class="panel">
+          <div class="current">
+            <span id="swatch" class="swatch"></span>
+            <span>label <b id="label-id">-</b></span>
+          </div>
+          <label>Brush <span id="brush-value">6</span>
+            <input id="brush" type="range" min="1" max="30" value="6"></label>
+          <label>Masks
+            <input id="opacity" type="range" min="0" max="100" value="45"></label>
+          <label>Contrast
+            <input id="contrast" type="range" min="-100" max="100" value="0"></label>
+          <label class="check"><input id="outline" type="checkbox"> outlines only</label>
+          <label class="check"><input id="protect" type="checkbox"> paint over background only</label>
+          <label class="check"><input id="finger" type="checkbox"> fingers draw too</label>
+          <button id="btn-fit">Fit</button>
+        </div>
+      </aside>
+    </div>
+
+    <div id="window-drawer" class="drawer" hidden>
+      <div class="drawer-head"><b>Crops in this batch</b><button id="btn-close-drawer">Close</button></div>
+      <div id="window-list" class="window-list"></div>
+    </div>
+  </section>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
