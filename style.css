@@ -79,7 +79,7 @@ button:disabled { opacity: 0.4; }
 .empty { color: var(--muted); padding: 30px; text-align: center; line-height: 1.5; }
 
 /* ---------------------------------------------------------------- editor */
-.workspace { flex: 1; display: grid; grid-template-columns: 84px 1fr 210px; min-height: 0; }
+.workspace { flex: 1; display: grid; grid-template-columns: 84px 64px 1fr 210px; min-height: 0; }
 .tools { background: var(--panel); border-right: 1px solid var(--line); padding: 8px 6px;
          display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
 .tool { width: 72px; min-height: 58px; padding: 6px 0 4px; display: flex; flex-direction: column;
@@ -91,6 +91,21 @@ button:disabled { opacity: 0.4; }
 .tool.active { background: var(--panel-2); border-color: var(--accent); }
 .tool.active span { color: var(--text); }
 .tools hr { width: 60%; border: none; border-top: 1px solid var(--line); margin: 4px auto; }
+
+/* Z strip for the free hand: one segment per plane, the highest on top */
+.zstrip { display: flex; flex-direction: column; gap: 3px; padding: 8px 6px;
+          background: var(--panel); border-right: 1px solid var(--line);
+          touch-action: none; min-height: 0; }
+.zseg { flex: 1; min-height: 4px; border-radius: 6px; background: var(--panel-2);
+        border: 1px solid var(--line); display: flex; align-items: center;
+        justify-content: center; position: relative; overflow: hidden;
+        font-size: 12px; color: var(--muted); }
+.zseg.primary::after { content: ''; position: absolute; right: 5px; width: 6px; height: 6px;
+                       border-radius: 50%; background: var(--muted); }
+.zseg.current { background: var(--accent); border-color: var(--accent); color: var(--accent-text);
+                font-weight: 600; }
+.zseg.current.primary::after { background: var(--accent-text); }
+.zstrip.scrubbing .zseg.current { filter: brightness(1.15); }
 
 .stage { position: relative; min-width: 0; min-height: 0; background: #000; overflow: hidden; }
 #view { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none;
@@ -137,7 +152,7 @@ button:disabled { opacity: 0.4; }
 
 /* portrait: tools along the bottom */
 @media (orientation: portrait) {
-  .workspace { grid-template-columns: 1fr 190px; grid-template-rows: 1fr auto; }
+  .workspace { grid-template-columns: 56px 1fr 190px; grid-template-rows: 1fr auto; }
   .tools { grid-column: 1 / -1; grid-row: 2; flex-direction: row; border-right: none;
            border-top: 1px solid var(--line); overflow-x: auto; }
   .tools hr { width: auto; height: 60%; border-top: none; border-left: 1px solid var(--line);

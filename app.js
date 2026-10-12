@@ -216,6 +216,7 @@ async function openWindow(i) {
   plane.height = info.shape[1];
   planeImage = pctx.createImageData(plane.width, plane.height);
   updateTitle();
+  buildZStrip();
   fit();
   loadPlane();
   setLabel(state.label);
@@ -438,7 +439,51 @@ function loadPlane() {
   state.lab = state.session.labelPlane(state.z);
   $('z').value = String(state.z);
   $('z-label').textContent = `z ${state.z + 1} / ${state.session.nz}`;
+  for (const seg of $('zstrip').children) {
+    seg.classList.toggle('current', Number(seg.dataset.z) === state.z);
+  }
   render();
+}
+
+// Z strip for the free hand: one segment per plane, the highest on top; planes
+// holding the crop's own mask carry a dot.
+function buildZStrip() {
+  const strip = $('zstrip');
+  const primary = new Set(state.session.info.primary_z);
+  strip.innerHTML = '';
+  for (let z = state.session.nz - 1; z >= 0; z--) {
+    const seg = document.createElement('div');
+    seg.className = `zseg${primary.has(z) ? ' primary' : ''}`;
+    seg.dataset.z = String(z);
+    seg.textContent = String(z + 1);
+    strip.appendChild(seg);
+  }
+}
+
+function zFromStrip(e) {
+  const r = $('zstrip').getBoundingClientRect();
+  const frac = (e.clientY - r.top) / Math.max(r.height, 1);
+  return state.session.nz - 1 - Math.floor(Math.max(0, Math.min(0.9999, frac)) * state.session.nz);
+}
+
+let scrubId = null;
+$('zstrip').addEventListener('pointerdown', (e) => {
+  if (!state.session || scrubId !== null) return;
+  e.preventDefault();
+  scrubId = e.pointerId;
+  $('zstrip').setPointerCapture(e.pointerId);
+  $('zstrip').classList.add('scrubbing');
+  setZ(zFromStrip(e));
+});
+$('zstrip').addEventListener('pointermove', (e) => {
+  if (e.pointerId === scrubId) setZ(zFromStrip(e));
+});
+for (const ev of ['pointerup', 'pointercancel']) {
+  $('zstrip').addEventListener(ev, (e) => {
+    if (e.pointerId !== scrubId) return;
+    scrubId = null;
+    $('zstrip').classList.remove('scrubbing');
+  });
 }
 
 function setZ(z) {
