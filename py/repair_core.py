@@ -69,6 +69,37 @@ class Session:
         self.edited: set = set()
         self.edited_z: set = set()
         self.history: List[np.ndarray] = []
+        self.base = self.labels.copy()       # what "unchanged" means (see apply_commit)
+        self.prior = None                    # commit this session continues from
+
+    def apply_commit(self, masks_path, bounds: Sequence[int], name: str) -> None:
+        """Continue from an earlier commit of this window: its masks replace the
+        window's within its bounds.  A new commit then replaces it
+        (``supersedes``) and covers at least its planes."""
+        z0, z1, y0, y1, x0, x1 = (int(v) for v in bounds)
+        self.labels[z0:z1, y0:y1, x0:x1] = tifffile.imread(str(masks_path)).astype(np.int32)
+        self.base = self.labels.copy()
+        self.history.clear()
+        self.prior = str(name)
+        self.edited_z |= set(range(z0, z1))
+
+    def changed(self) -> bool:
+        """Whether the masks differ from where this session started."""
+        return not np.array_equal(self.labels, self.base)
+
+    def snapshot(self):
+        """Draft of the edits: the masks (int32, flat) and the edit record (JSON)."""
+        state = {'edited': sorted(int(i) for i in self.edited),
+                 'edited_z': sorted(int(z) for z in self.edited_z), 'prior': self.prior}
+        return _flat(self.labels, np.int32), json.dumps(state)
+
+    def restore(self, labels: Any, state: str) -> None:
+        """Pick up a draft saved by :meth:`snapshot`."""
+        self.labels = _as_array(labels, np.int32, self.labels.shape)
+        s = json.loads(state)
+        self.edited = set(s['edited'])
+        self.edited_z = set(s['edited_z'])
+        self.history.clear()
 
     # ------------------------------------------------------------ reading
     def info(self) -> str:
@@ -213,6 +244,7 @@ class Session:
             'created': when.isoformat(timespec='seconds'),
             'batch': self.batch.get('name'), 'window': self.window['name'],
             'edited_labels': [int(i) for i in edited],
+            'supersedes': self.prior,
         }
         out = Path(out_dir)
         out.mkdir(parents=True, exist_ok=True)
@@ -220,4 +252,13 @@ class Session:
         tifffile.imwrite(out / files[0], img, photometric='minisblack')
         tifffile.imwrite(out / files[1], masks.astype(mask_dtype), photometric='minisblack')
         (out / files[2]).write_text(json.dumps(meta, indent=2), encoding='utf-8')
+        # the committed state is the new start: committing again replaces it
+        self.prior = name
+        self.rebase()
         return json.dumps({'name': name, 'files': files, 'meta': meta})
+
+    def rebase(self) -> None:
+        """Take the current masks as the start (after a commit, or a skip):
+        nothing is unsaved any more."""
+        self.base = self.labels.copy()
+        self.history.clear()

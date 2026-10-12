@@ -153,30 +153,51 @@ export class LocalStore {
   }
 }
 
-// ------------------------------------------------------------------ outbox
-// Commits wait here until every file is uploaded.
+// ------------------------------------------------------------------ on the iPad
+// The outbox keeps commits until every file is uploaded; drafts keep the
+// uncommitted edits of each crop, so leaving a crop -- or iOS closing the
+// app -- loses nothing.
 const DB = 'nuclei-repair';
+let opened = null;
 
 function db() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB, 1);
-    req.onupgradeneeded = () => req.result.createObjectStore('outbox', { autoIncrement: true });
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
+  if (!opened) {
+    opened = new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB, 2);
+      req.onupgradeneeded = () => {
+        const d = req.result;
+        if (!d.objectStoreNames.contains('outbox')) {
+          d.createObjectStore('outbox', { autoIncrement: true });
+        }
+        if (!d.objectStoreNames.contains('drafts')) d.createObjectStore('drafts');
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  return opened;
 }
 
-function tx(mode, fn) {
+function request(name, mode, fn) {
   return db().then((d) => new Promise((resolve, reject) => {
-    const t = d.transaction('outbox', mode);
-    const out = fn(t.objectStore('outbox'));
-    t.oncomplete = () => resolve(out && out.result !== undefined ? out.result : out);
+    const t = d.transaction(name, mode);
+    const req = fn(t.objectStore(name));
+    t.oncomplete = () => resolve(req ? req.result : undefined);
     t.onerror = () => reject(t.error);
   }));
 }
 
+export const drafts = {
+  get: (key) => request('drafts', 'readonly', (s) => s.get(key)),
+  put: (key, value) => request('drafts', 'readwrite', (s) => s.put(value, key)),
+  remove: (key) => request('drafts', 'readwrite', (s) => s.delete(key)),
+  keys: () => request('drafts', 'readonly', (s) => s.getAllKeys()),
+};
+
+let flushing = null;
+
 export const outbox = {
-  add: (entry) => tx('readwrite', (s) => s.add(entry)),
+  add: (entry) => request('outbox', 'readwrite', (s) => s.add(entry)),
   async entries() {
     const d = await db();
     return new Promise((resolve, reject) => {
@@ -189,20 +210,34 @@ export const outbox = {
       req.onerror = () => reject(req.error);
     });
   },
-  remove: (key) => tx('readwrite', (s) => s.delete(key)),
+  remove: (key) => request('outbox', 'readwrite', (s) => s.delete(key)),
   async count() { return (await this.entries()).length; },
 
-  // Upload what is waiting; returns the number left.
-  async flush(store) {
+  // A file still waiting to upload (a commit reopened before it reached Drive).
+  async find(path) {
     for (const entry of await this.entries()) {
-      try {
-        for (const f of entry.files) await store.write(f.path, f.bytes, f.mime);
-        await this.remove(entry.key);
-      } catch (e) {
-        console.warn('outbox:', e);
-        break;
-      }
+      const hit = entry.files.find((f) => f.path === path);
+      if (hit) return hit.bytes;
     }
-    return this.count();
+    return null;
+  },
+
+  // Upload what is waiting, one flush at a time; returns the number left.
+  flush(store) {
+    if (!flushing) {
+      flushing = (async () => {
+        for (const entry of await this.entries()) {
+          try {
+            for (const f of entry.files) await store.write(f.path, f.bytes, f.mime);
+            await this.remove(entry.key);
+          } catch (e) {
+            console.warn('outbox:', e);
+            break;
+          }
+        }
+        return this.count();
+      })().finally(() => { flushing = null; });
+    }
+    return flushing;
   },
 };

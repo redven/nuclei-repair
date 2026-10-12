@@ -5,7 +5,7 @@
 // format; the workstation merges them into its training crops.
 
 import { CONFIG } from './config.js';
-import { DriveStore, LocalStore, outbox } from './store.js';
+import { DriveStore, LocalStore, drafts, outbox } from './store.js';
 import { startEngine, Session } from './engine.js';
 
 const $ = (id) => document.getElementById(id);
@@ -53,7 +53,7 @@ const HINTS = {
 // ------------------------------------------------------------------ state
 const state = {
   batchName: '', batch: null, statuses: {}, index: 0,
-  session: null, z: 0, img: null, lab: null, edits: 0,
+  session: null, z: 0, img: null, lab: null, busy: false,
   tool: 'paint', label: 0, brush: 6, opacity: 0.45, contrast: 0,
   outline: false, protect: false, finger: false,
   view: { s: 1, x: 0, y: 0 }, pending: null, stroke: null, hover: null,
@@ -187,15 +187,46 @@ function openBatch(b) {
 
 $('btn-refresh').onclick = () => { ensureSignedIn().then(showBatches).catch((e) => msg(e.message)); };
 $('btn-back').onclick = () => {
-  if (state.edits && !confirm('Leave this crop without committing your changes?')) return;
-  state.edits = 0;
-  ensureSignedIn().then(showBatches).catch(() => showBatches());
+  const signing = ensureSignedIn();          // nothing is lost: the draft is kept
+  saveDraftNow().then(() => signing).then(showBatches).catch(() => showBatches());
 };
 
+// ------------------------------------------------------------------ drafts
+// The uncommitted edits of a crop live on the iPad until it is committed or
+// skipped: leaving the crop, or iOS closing the app, loses nothing.
+const draftKey = () => `${state.batchName}/${state.batch.crops[state.index].name}`;
+let draftTimer = 0;
+
+async function saveDraftNow() {
+  clearTimeout(draftTimer);
+  draftTimer = 0;
+  const s = state.session;
+  if (!s || !state.batch) return;
+  const key = draftKey();
+  if (!s.changed()) { await drafts.remove(key); return; }
+  await drafts.put(key, { ...s.snapshot(), time: Date.now() });
+}
+
+function saveDraft() {                       // after every edit, debounced
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(() => { saveDraftNow().catch((e) => console.warn('draft:', e)); }, 600);
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') saveDraftNow();
+});
+window.addEventListener('pagehide', () => { saveDraftNow(); });
+
 // ------------------------------------------------------------------ windows
+// The masks a committed crop was committed with: from Drive, or from the
+// outbox while its upload is still waiting.
+async function committedMasks(name) {
+  const path = `batches/${state.batchName}/repaired/${name}_masks.tif`;
+  return (await outbox.find(path)) || store.read(path);
+}
+
 async function openWindow(i) {
+  if (state.session) await saveDraftNow();
   const w = state.batch.crops[i];
-  state.index = i;
   msg(`Loading ${w.name} ...`);
   const base = `batches/${state.batchName}/crops/${w.name}`;
   let img, masks;
@@ -206,13 +237,32 @@ async function openWindow(i) {
     msg(`Could not load ${w.name}: ${e.message}`, true);
     return;
   }
+  state.index = i;
   if (state.session) state.session.destroy();
   state.session = new Session(img, masks, w, state.batch);
+  const notes = [];
+  const done = state.statuses[w.name];
+  if (done && done.state === 'done' && done.crops && done.crops.length) {
+    const last = done.crops[done.crops.length - 1];
+    try {
+      state.session.applyCommit(await committedMasks(last), done.bounds_zyx, last);
+      notes.push(`committed as ${last}, shown as committed`);
+    } catch (e) {
+      notes.push(`committed as ${last}, but its masks could not be loaded (${e.message})`);
+    }
+  } else if (done) {
+    notes.push('skipped');
+  }
+  const draft = await drafts.get(draftKey());
+  if (draft) {
+    state.session.restore(draft);
+    notes.push(`your unsaved changes from ${new Date(draft.time).toLocaleTimeString([],
+      { hour: '2-digit', minute: '2-digit' })} are back`);
+  }
   const info = state.session.info;
   state.label = info.primary;
   state.z = info.primary_z.length ? info.primary_z[info.primary_z.length >> 1] : 0;
   state.pending = null;
-  state.edits = 0;
   $('z').max = String(info.shape[0] - 1);
   plane.width = info.shape[2];
   plane.height = info.shape[1];
@@ -221,10 +271,9 @@ async function openWindow(i) {
   fit();
   loadPlane();
   setLabel(state.label);
-  const done = state.statuses[w.name];
-  msg(done ? `Already ${done.state}${done.crops ? `: ${done.crops.join(', ')}` : ''}`
-           : `Mask ${info.primary} with ${w.connected_labels.length} touching; ` +
-             `${info.shape[0]} planes`);
+  msg(notes.length ? `${w.name}: ${notes.join('; ')}`
+                   : `Mask ${info.primary} with ${w.connected_labels.length} touching; ` +
+                     `${info.shape[0]} planes`);
 }
 
 function updateTitle() {
@@ -232,15 +281,17 @@ function updateTitle() {
   const c = counts({ info: state.batch, statuses: state.statuses });
   $('title').textContent = `${w.name}`;
   $('progress-badge').textContent = `${state.index + 1} / ${c.total}  -  ${c.done} done`;
-  $('btn-prev').disabled = state.index === 0;
-  $('btn-next').disabled = state.index >= c.total - 1;
+  $('btn-prev').disabled = state.busy || state.index === 0;
+  $('btn-next').disabled = state.busy || state.index >= c.total - 1;
   const s = state.statuses[w.name];
   $('btn-commit').textContent = s && s.state === 'done' ? 'Commit again' : 'Commit';
 }
 
-function leaveWindow(to) {
-  if (state.edits && !confirm('Discard the changes to this crop?')) return;
-  openWindow(to);
+// While a commit is being saved, nothing else may start (no double commit).
+function setBusy(on) {
+  state.busy = on;
+  for (const id of ['btn-commit', 'btn-skip', 'btn-back']) $(id).disabled = on;
+  updateTitle();
 }
 
 function nextOpen(after) {
@@ -252,18 +303,25 @@ function nextOpen(after) {
   return -1;
 }
 
-$('btn-prev').onclick = () => leaveWindow(state.index - 1);
-$('btn-next').onclick = () => leaveWindow(state.index + 1);
-$('btn-windows').onclick = () => {
+$('btn-prev').onclick = () => { if (!state.busy) openWindow(state.index - 1); };
+$('btn-next').onclick = () => { if (!state.busy) openWindow(state.index + 1); };
+$('btn-windows').onclick = async () => {
   const list = $('window-list');
   list.innerHTML = '';
+  const withDraft = new Set(await drafts.keys());
   state.batch.crops.forEach((w, i) => {
     const s = state.statuses[w.name];
+    const draft = withDraft.has(`${state.batchName}/${w.name}`) ||
+                  (i === state.index && state.session && state.session.changed());
+    const label = draft ? 'unsaved changes' : s ? s.state : 'to repair';
     const row = document.createElement('div');
     row.className = `window-row${i === state.index ? ' current' : ''}`;
     row.innerHTML = `<span>${esc(w.name)}</span>` +
-      `<span class="state ${s ? s.state : ''}">${s ? s.state : 'to repair'}</span>`;
-    row.onclick = () => { $('window-drawer').hidden = true; leaveWindow(i); };
+      `<span class="state ${draft ? 'draft' : s ? s.state : ''}">${label}</span>`;
+    row.onclick = () => {
+      $('window-drawer').hidden = true;
+      if (!state.busy && i !== state.index) openWindow(i);
+    };
     list.appendChild(row);
   });
   $('window-drawer').hidden = false;
@@ -271,44 +329,71 @@ $('btn-windows').onclick = () => {
 $('btn-close-drawer').onclick = () => { $('window-drawer').hidden = true; };
 
 // ------------------------------------------------------------------ commit / skip
+// A commit is safe once it is in the outbox on the iPad; the app moves on at
+// once and uploads in the background (the orange note shows what is waiting).
+function upload() {
+  updateOutbox();
+  return outbox.flush(store).then(updateOutbox).catch((e) => console.warn('upload:', e));
+}
+
 async function finish(status, files, note) {
   const w = state.batch.crops[state.index];
   const base = `batches/${state.batchName}`;
   await outbox.add({ files: [
     ...files.map((f) => ({ path: `${base}/repaired/${f.name}`, bytes: f.bytes, mime: f.mime })),
     { path: `${base}/status/${w.name}.json`, bytes: encode(status), mime: 'application/json' }] });
+  await drafts.remove(draftKey());
   state.statuses[w.name] = status;
-  state.edits = 0;
-  const left = await outbox.flush(store);
-  updateOutbox(left);
+  upload();
   const next = nextOpen(state.index);
   if (next < 0) {
-    msg(`${note}. All crops of this batch are done.`);
     updateTitle();
+    msg(`${note}. All crops of this batch are done.`);
     return;
   }
   await openWindow(next);
-  msg(left ? `${note} - waiting to upload` : note);
+  msg(`${note} - saved on this iPad, uploading. Now: ${state.batch.crops[next].name}`);
+}
+
+async function settle(make, failure) {
+  if (state.busy || !state.session) return;
+  setBusy(true);
+  msg('Saving ...');
+  try {
+    const [status, files, note] = make();
+    await finish(status, files, note);
+  } catch (e) {
+    msg(`${failure}: ${e.message}`, true);
+  } finally {
+    setBusy(false);
+  }
 }
 
 $('btn-commit').onclick = () => {
-  const signing = ensureSignedIn();
-  if (!state.edits && !confirm('Nothing was changed. Commit this crop as correct?')) return;
-  signing.then(() => {
+  if (state.busy || !state.session) return;
+  const signing = ensureSignedIn();          // in the tap: Safari allows the Google window
+  if (!state.session.changed() &&
+      !confirm('Nothing was changed. Commit this crop as correct?')) return;
+  settle(() => {
     const prev = state.statuses[state.batch.crops[state.index].name];
     const { record, files } = state.session.commit(device());
     const status = { state: 'done', time: new Date().toISOString(), device: device(),
                      crops: [...((prev && prev.crops) || []), record.name],
                      bounds_zyx: record.meta.bounds_zyx };
-    return finish(status, files, `Committed ${record.name}`);
-  }).catch((e) => msg(`Commit failed: ${e.message}`, true));
+    return [status, files, `Committed ${record.name}`];
+  }, 'Commit failed');
+  signing.then(upload).catch(() => updateOutbox());
 };
 
 $('btn-skip').onclick = () => {
+  if (state.busy || !state.session) return;
   const signing = ensureSignedIn();
-  signing.then(() => finish({ state: 'skipped', time: new Date().toISOString(),
-                              device: device() }, [], 'Skipped'))
-    .catch((e) => msg(`Skip failed: ${e.message}`, true));
+  settle(() => {
+    state.session.rebase();                  // a skip discards: no draft of it remains
+    return [{ state: 'skipped', time: new Date().toISOString(), device: device() }, [],
+            'Skipped'];
+  }, 'Skip failed');
+  signing.then(upload).catch(() => updateOutbox());
 };
 
 async function updateOutbox(n) {
@@ -320,13 +405,10 @@ async function updateOutbox(n) {
 }
 for (const id of ['outbox', 'outbox-batches']) {
   $(id).onclick = () => {
-    ensureSignedIn().then(() => outbox.flush(store)).then(updateOutbox)
-      .catch((e) => msg(e.message, true));
+    ensureSignedIn().then(upload).catch((e) => msg(e.message, true));
   };
 }
-window.addEventListener('online', () => {
-  if (store.signedIn) outbox.flush(store).then(updateOutbox);
-});
+window.addEventListener('online', () => { if (store.signedIn) upload(); });
 
 // ------------------------------------------------------------------ drawing
 function color(id) {
@@ -493,7 +575,7 @@ function action(id) {
     msg(`New label ${state.label}: paint it`);
   } else if (id === 'undo') {
     if (state.session.undo()) {
-      state.edits = Math.max(0, state.edits - 1);
+      saveDraft();
       loadPlane();
       msg('Undone');
     } else msg('Nothing to undo');
@@ -504,7 +586,7 @@ function runOp(op, points) {
   msg('Working ...');
   setTimeout(() => {                    // let the message paint before Python runs
     const r = state.session.run(op, points);
-    if (r.ok) state.edits += 1;
+    if (r.ok) saveDraft();
     loadPlane();
     msg(r.msg || (r.ok ? 'Done' : 'Nothing changed'), !r.ok);
   }, 20);
@@ -590,7 +672,7 @@ function toolUp() {
     return;
   }
   const r = state.session.setPlane(state.z, state.lab);
-  if (r.edited.length) state.edits += 1;
+  if (r.edited.length) saveDraft();
   state.lab = state.session.labelPlane(state.z);
   render();
 }

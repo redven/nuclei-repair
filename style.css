@@ -146,6 +146,7 @@ button:disabled { opacity: 0.4; }
          color: var(--muted); }
 .state.done { color: var(--ok); border-color: var(--ok); }
 .state.skipped { color: var(--warn); border-color: var(--warn); }
+.state.draft { color: var(--accent); border-color: var(--accent); }
 
 /* portrait: same left column, so Z stays under the thumb */
 @media (orientation: portrait) {

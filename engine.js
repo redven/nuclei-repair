@@ -70,6 +70,25 @@ export class Session {
   run(op, points) { return JSON.parse(this.s.run(op, JSON.stringify(points))); }
   undo() { return this.s.undo(); }
   commitBounds() { return this.s.commit_bounds().toJs(); }
+  changed() { return this.s.changed(); }
+  rebase() { this.s.rebase(); }
+
+  // Continue from an earlier commit of this window (its masks file's bytes).
+  applyCommit(masksBytes, bounds, name) {
+    py.FS.writeFile('/tmp/prior_masks.tif', masksBytes);
+    this.s.apply_commit('/tmp/prior_masks.tif', py.toPy(bounds), name);
+  }
+
+  // Draft of the uncommitted edits: {labels: Int32Array, state: JSON}.
+  snapshot() {
+    const pair = this.s.snapshot();
+    const labels = take(pair.get(0));
+    const state = pair.get(1);
+    pair.destroy();
+    return { labels, state };
+  }
+
+  restore(draft) { this.s.restore(draft.labels, draft.state); }
 
   // Files of the committed crop: [{name, bytes, mime}], and the record.
   commit(device) {
