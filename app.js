@@ -32,11 +32,13 @@ const ICONS = {
   relabel: '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8" r="1.5"/>',
   undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
 };
+// two per row under the thumb's Z buttons: plane and 3D variants side by side
 const TOOLS = [
   ['paint', 'Paint'], ['erase', 'Erase'], ['pick', 'Pick'], ['new', 'New', 'action'], null,
-  ['cut', 'Cut'], ['merge2d', 'Merge'], ['merge3d', 'Merge 3D'], null,
-  ['delete2d', 'Delete'], ['delete3d', 'Delete 3D'], ['relabel', 'Relabel'], null,
-  ['undo', 'Undo', 'action'],
+  ['cut', 'Cut'], ['relabel', 'Relabel'], null,
+  ['merge2d', 'Merge'], ['merge3d', 'Merge 3D'], null,
+  ['delete2d', 'Delete'], ['delete3d', 'Delete 3D'], null,
+  ['undo', 'Undo', 'action wide'],
 ];
 const HINTS = {
   paint: 'Paint the current label', erase: 'Erase to background',
@@ -216,7 +218,6 @@ async function openWindow(i) {
   plane.height = info.shape[1];
   planeImage = pctx.createImageData(plane.width, plane.height);
   updateTitle();
-  buildZStrip();
   fit();
   loadPlane();
   setLabel(state.label);
@@ -439,51 +440,7 @@ function loadPlane() {
   state.lab = state.session.labelPlane(state.z);
   $('z').value = String(state.z);
   $('z-label').textContent = `z ${state.z + 1} / ${state.session.nz}`;
-  for (const seg of $('zstrip').children) {
-    seg.classList.toggle('current', Number(seg.dataset.z) === state.z);
-  }
   render();
-}
-
-// Z strip for the free hand: one segment per plane, the highest on top; planes
-// holding the crop's own mask carry a dot.
-function buildZStrip() {
-  const strip = $('zstrip');
-  const primary = new Set(state.session.info.primary_z);
-  strip.innerHTML = '';
-  for (let z = state.session.nz - 1; z >= 0; z--) {
-    const seg = document.createElement('div');
-    seg.className = `zseg${primary.has(z) ? ' primary' : ''}`;
-    seg.dataset.z = String(z);
-    seg.textContent = String(z + 1);
-    strip.appendChild(seg);
-  }
-}
-
-function zFromStrip(e) {
-  const r = $('zstrip').getBoundingClientRect();
-  const frac = (e.clientY - r.top) / Math.max(r.height, 1);
-  return state.session.nz - 1 - Math.floor(Math.max(0, Math.min(0.9999, frac)) * state.session.nz);
-}
-
-let scrubId = null;
-$('zstrip').addEventListener('pointerdown', (e) => {
-  if (!state.session || scrubId !== null) return;
-  e.preventDefault();
-  scrubId = e.pointerId;
-  $('zstrip').setPointerCapture(e.pointerId);
-  $('zstrip').classList.add('scrubbing');
-  setZ(zFromStrip(e));
-});
-$('zstrip').addEventListener('pointermove', (e) => {
-  if (e.pointerId === scrubId) setZ(zFromStrip(e));
-});
-for (const ev of ['pointerup', 'pointercancel']) {
-  $('zstrip').addEventListener(ev, (e) => {
-    if (e.pointerId !== scrubId) return;
-    scrubId = null;
-    $('zstrip').classList.remove('scrubbing');
-  });
 }
 
 function setZ(z) {
@@ -507,12 +464,12 @@ function buildTools() {
   const nav = $('tools');
   for (const t of TOOLS) {
     if (!t) { nav.appendChild(document.createElement('hr')); continue; }
-    const [id, label, kind] = t;
+    const [id, label, kind = ''] = t;
     const b = document.createElement('button');
-    b.className = 'tool';
+    b.className = `tool${kind.includes('wide') ? ' wide' : ''}`;
     b.dataset.tool = id;
     b.innerHTML = `<svg viewBox="0 0 24 24">${ICONS[id]}</svg><span>${label}</span>`;
-    b.onclick = () => (kind === 'action' ? action(id) : selectTool(id));
+    b.onclick = () => (kind.includes('action') ? action(id) : selectTool(id));
     nav.appendChild(b);
   }
   selectTool('paint', true);
@@ -764,6 +721,8 @@ for (const ev of ['gesturestart', 'gesturechange']) {
 $('z').oninput = (e) => setZ(Number(e.target.value));
 $('btn-zup').onclick = () => setZ(state.z + 1);
 $('btn-zdown').onclick = () => setZ(state.z - 1);
+$('btn-zup-thumb').onclick = () => setZ(state.z + 1);
+$('btn-zdown-thumb').onclick = () => setZ(state.z - 1);
 $('brush').oninput = (e) => {
   state.brush = Number(e.target.value);
   $('brush-value').textContent = String(state.brush);

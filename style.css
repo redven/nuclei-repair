@@ -79,33 +79,30 @@ button:disabled { opacity: 0.4; }
 .empty { color: var(--muted); padding: 30px; text-align: center; line-height: 1.5; }
 
 /* ---------------------------------------------------------------- editor */
-.workspace { flex: 1; display: grid; grid-template-columns: 84px 64px 1fr 210px; min-height: 0; }
-.tools { background: var(--panel); border-right: 1px solid var(--line); padding: 8px 6px;
-         display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
-.tool { width: 72px; min-height: 58px; padding: 6px 0 4px; display: flex; flex-direction: column;
+.workspace { flex: 1; display: grid; grid-template-columns: 140px 1fr 210px; min-height: 0; }
+.tools { background: var(--panel); border-right: 1px solid var(--line); padding: 8px;
+         display: grid; grid-template-columns: 1fr 1fr; gap: 4px; align-content: start;
+         overflow-y: auto; }
+.tool { min-height: 58px; padding: 6px 0 4px; display: flex; flex-direction: column;
         align-items: center; justify-content: center; gap: 3px; border-radius: 8px;
         border: 1px solid transparent; background: transparent; color: var(--text); }
-.tool svg { width: 24px; height: 24px; stroke: currentColor; fill: none; stroke-width: 1.8;
-            stroke-linecap: round; stroke-linejoin: round; }
+.tool.wide { grid-column: 1 / -1; }
+.tool svg, .zbtn svg { width: 24px; height: 24px; stroke: currentColor; fill: none;
+                       stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .tool span { font-size: 11px; color: var(--muted); }
 .tool.active { background: var(--panel-2); border-color: var(--accent); }
 .tool.active span { color: var(--text); }
-.tools hr { width: 60%; border: none; border-top: 1px solid var(--line); margin: 4px auto; }
+.tools hr { grid-column: 1 / -1; width: 70%; border: none; border-top: 1px solid var(--line);
+            margin: 4px auto; }
 
-/* Z strip for the free hand: one segment per plane, the highest on top */
-.zstrip { display: flex; flex-direction: column; gap: 3px; padding: 8px 6px;
-          background: var(--panel); border-right: 1px solid var(--line);
-          touch-action: none; min-height: 0; }
-.zseg { flex: 1; min-height: 4px; border-radius: 6px; background: var(--panel-2);
-        border: 1px solid var(--line); display: flex; align-items: center;
-        justify-content: center; position: relative; overflow: hidden;
-        font-size: 12px; color: var(--muted); }
-.zseg.primary::after { content: ''; position: absolute; right: 5px; width: 6px; height: 6px;
-                       border-radius: 50%; background: var(--muted); }
-.zseg.current { background: var(--accent); border-color: var(--accent); color: var(--accent-text);
-                font-weight: 600; }
-.zseg.current.primary::after { background: var(--accent-text); }
-.zstrip.scrubbing .zseg.current { filter: brightness(1.15); }
+/* Z for the left thumb, at the top of the left edge */
+.zpair { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+         margin-bottom: 6px; }
+.zbtn { height: 72px; padding: 0; display: flex; flex-direction: column; align-items: center;
+        justify-content: center; gap: 2px; border-radius: 10px; background: #303744;
+        border-color: #3f4756; color: var(--text); font-weight: 600; font-size: 13px; }
+.zbtn:active { background: var(--accent); border-color: var(--accent); filter: none; }
+.zbtn svg { width: 30px; height: 30px; stroke-width: 2.4; }
 
 .stage { position: relative; min-width: 0; min-height: 0; background: #000; overflow: hidden; }
 #view { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none;
@@ -136,7 +133,7 @@ button:disabled { opacity: 0.4; }
 .swatch { width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--line); }
 
 /* windows drawer */
-.drawer { position: absolute; top: 60px; left: 90px; width: min(420px, 70vw); max-height: 70vh;
+.drawer { position: absolute; top: 60px; left: 146px; width: min(420px, 60vw); max-height: 70vh;
           background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
           display: flex; flex-direction: column; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5); }
 .drawer-head { display: flex; align-items: center; justify-content: space-between;
@@ -150,12 +147,7 @@ button:disabled { opacity: 0.4; }
 .state.done { color: var(--ok); border-color: var(--ok); }
 .state.skipped { color: var(--warn); border-color: var(--warn); }
 
-/* portrait: tools along the bottom */
+/* portrait: same left column, so Z stays under the thumb */
 @media (orientation: portrait) {
-  .workspace { grid-template-columns: 56px 1fr 190px; grid-template-rows: 1fr auto; }
-  .tools { grid-column: 1 / -1; grid-row: 2; flex-direction: row; border-right: none;
-           border-top: 1px solid var(--line); overflow-x: auto; }
-  .tools hr { width: auto; height: 60%; border-top: none; border-left: 1px solid var(--line);
-              margin: auto 4px; }
-  .drawer { left: 12px; }
+  .workspace { grid-template-columns: 140px 1fr 180px; }
 }

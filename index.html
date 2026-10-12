@@ -53,10 +53,15 @@
     </header>
 
     <div class="workspace">
-      <nav id="tools" class="tools" aria-label="Tools"></nav>
-
-      <!-- Z for the free hand: tap a plane, or slide a finger up and down -->
-      <div id="zstrip" class="zstrip" role="slider" aria-label="Z plane"></div>
+      <nav id="tools" class="tools" aria-label="Tools">
+        <!-- Z for the left thumb: top of the left edge -->
+        <div class="zpair">
+          <button id="btn-zdown-thumb" class="zbtn" aria-label="Z down">
+            <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg><span>Z-</span></button>
+          <button id="btn-zup-thumb" class="zbtn" aria-label="Z up">
+            <svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg><span>Z+</span></button>
+        </div>
+      </nav>
 
       <div class="stage">
         <canvas id="view"></canvas>

@@ -24,6 +24,9 @@ GitHub Pages.
   repair each crop. When you are done, **Commit** it, or **Skip** a bad one.
   - **Apple Pencil:** draws with the current tool. One finger pans, two
     fingers zoom, and a double tap with a finger fits the view.
+  - **Z:** the two large buttons at the top of the left edge, for the left
+    thumb (Z- and Z+), or the slider on the right. Z doesn't change during a
+    Pencil stroke.
   - **Tools:** Paint, Erase, Pick (take the label under the Pencil), New
     (a new label), Cut (draw across a mask to split it), Merge / Merge 3D (tap
     the mask to keep, then the one to merge into it), Delete / Delete 3D,
