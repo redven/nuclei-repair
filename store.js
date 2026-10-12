@@ -213,13 +213,15 @@ export const outbox = {
   remove: (key) => request('outbox', 'readwrite', (s) => s.delete(key)),
   async count() { return (await this.entries()).length; },
 
-  // A file still waiting to upload (a commit reopened before it reached Drive).
+  // A file still waiting to upload (a commit reopened before it reached Drive);
+  // the newest, if the crop was committed again meanwhile.
   async find(path) {
+    let bytes = null;
     for (const entry of await this.entries()) {
       const hit = entry.files.find((f) => f.path === path);
-      if (hit) return hit.bytes;
+      if (hit) bytes = hit.bytes;
     }
-    return null;
+    return bytes;
   },
 
   // Upload what is waiting, one flush at a time; returns the number left.

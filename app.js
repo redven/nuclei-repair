@@ -284,7 +284,7 @@ function updateTitle() {
   $('btn-prev').disabled = state.busy || state.index === 0;
   $('btn-next').disabled = state.busy || state.index >= c.total - 1;
   const s = state.statuses[w.name];
-  $('btn-commit').textContent = s && s.state === 'done' ? 'Commit again' : 'Commit';
+  $('btn-commit').textContent = s && s.state === 'done' ? 'Replace commit' : 'Commit';
 }
 
 // While a commit is being saved, nothing else may start (no double commit).
@@ -375,11 +375,10 @@ $('btn-commit').onclick = () => {
   if (!state.session.changed() &&
       !confirm('Nothing was changed. Commit this crop as correct?')) return;
   settle(() => {
-    const prev = state.statuses[state.batch.crops[state.index].name];
+    // one commit per crop: committing again replaces it (same name, files overwritten)
     const { record, files } = state.session.commit(device());
     const status = { state: 'done', time: new Date().toISOString(), device: device(),
-                     crops: [...((prev && prev.crops) || []), record.name],
-                     bounds_zyx: record.meta.bounds_zyx };
+                     crops: [record.name], bounds_zyx: record.meta.bounds_zyx };
     return [status, files, `Committed ${record.name}`];
   }, 'Commit failed');
   signing.then(upload).catch(() => updateOutbox());

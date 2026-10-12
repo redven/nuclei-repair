@@ -74,8 +74,8 @@ class Session:
 
     def apply_commit(self, masks_path, bounds: Sequence[int], name: str) -> None:
         """Continue from an earlier commit of this window: its masks replace the
-        window's within its bounds.  A new commit then replaces it
-        (``supersedes``) and covers at least its planes."""
+        window's within its bounds.  Committing again replaces that crop (same
+        name, files overwritten) and covers at least its planes."""
         z0, z1, y0, y1, x0, x1 = (int(v) for v in bounds)
         self.labels[z0:z1, y0:y1, x0:x1] = tifffile.imread(str(masks_path)).astype(np.int32)
         self.base = self.labels.copy()
@@ -228,7 +228,16 @@ class Session:
         present = set(np.unique(masks).tolist())
         edited = sorted(i for i in self.edited if i in present)   # not painted-then-erased
         ids = [self.primary] + [i for i in edited if i != self.primary]
-        name = f"repair_{when:%Y%m%d_%H%M%S}_{'_'.join(str(i) for i in ids[:3])}"
+        created = when
+        if self.prior:                       # committed before: the same crop, replaced
+            name = self.prior
+            try:
+                _, day, clock = name.split('_')[:3]
+                created = datetime.strptime(day + clock, '%Y%m%d%H%M%S')
+            except ValueError:
+                pass
+        else:
+            name = f"repair_{when:%Y%m%d_%H%M%S}_{'_'.join(str(i) for i in ids[:3])}"
         wz, _, wy, _, wx, _ = self.window['window_zyx']
         bounds = [z0, z1, y0, y1, x0, x1]
         origin = [wz, wz, wy, wy, wx, wx]
@@ -241,10 +250,10 @@ class Session:
             'percentiles_1_50_99': [float(v) for v in
                                     np.percentile(img.astype(np.float32), [1, 50, 99])],
             'volume_lowhigh': self.batch.get('source_range'),
-            'created': when.isoformat(timespec='seconds'),
+            'created': created.isoformat(timespec='seconds'),
+            'updated': when.isoformat(timespec='seconds'),
             'batch': self.batch.get('name'), 'window': self.window['name'],
             'edited_labels': [int(i) for i in edited],
-            'supersedes': self.prior,
         }
         out = Path(out_dir)
         out.mkdir(parents=True, exist_ok=True)
@@ -252,7 +261,7 @@ class Session:
         tifffile.imwrite(out / files[0], img, photometric='minisblack')
         tifffile.imwrite(out / files[1], masks.astype(mask_dtype), photometric='minisblack')
         (out / files[2]).write_text(json.dumps(meta, indent=2), encoding='utf-8')
-        # the committed state is the new start: committing again replaces it
+        # the committed state is the new start; committing again replaces this crop
         self.prior = name
         self.rebase()
         return json.dumps({'name': name, 'files': files, 'meta': meta})
