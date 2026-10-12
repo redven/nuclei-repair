@@ -30,7 +30,10 @@ self.addEventListener('fetch', (e) => {
 async function networkFirst(request) {
   const cache = await caches.open(APP);
   try {
-    const response = await fetch(request);
+    // revalidate with the server: GitHub Pages lets browsers keep files for
+    // 10 min, which would hide a fresh deploy (a new config.js) that long
+    const response = await fetch(new Request(request.url,
+                                             { cache: 'no-cache', credentials: 'same-origin' }));
     if (response.ok) cache.put(request, response.clone());
     return response;
   } catch (err) {
