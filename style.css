@@ -73,6 +73,7 @@ button:disabled { opacity: 0.4; }
 .card:active { border-color: var(--accent); }
 .card .name { font-weight: 600; font-size: 16px; word-break: break-all; }
 .card .meta { color: var(--muted); font-size: 13px; }
+.card .meta.tag { color: var(--accent); font-weight: 600; }
 .meter { height: 6px; border-radius: 3px; background: var(--panel-2); overflow: hidden; display: flex; }
 .meter .done { background: var(--ok); }
 .meter .skipped { background: var(--warn); }

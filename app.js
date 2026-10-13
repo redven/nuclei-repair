@@ -31,15 +31,28 @@ const ICONS = {
   delete3d: '<path d="M5 6h14M10 6V4h4v2M7 6l1 10h8l1-10M6 19h12M8 22h8"/>',
   relabel: '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8" r="1.5"/>',
   undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
+  erase2d: '<path d="m4 15 9-9 6 6-7 7H8z"/><circle cx="18" cy="19" r="2.5"/>',
+  erase3d: '<path d="m4 13 9-9 6 6-7 7H8z"/><path d="M6 20h12M8 23h8"/>',
+  fill2d: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5" fill="currentColor"/>',
 };
 // two per row under the thumb's Z buttons: plane and 3D variants side by side
-const TOOLS = [
-  ['paint', 'Paint'], ['erase', 'Erase'], ['pick', 'Pick'], ['new', 'New', 'action'], null,
-  ['cut', 'Cut'], ['relabel', 'Relabel'], null,
-  ['merge2d', 'Merge'], ['merge3d', 'Merge 3D'], null,
-  ['delete2d', 'Delete'], ['delete3d', 'Delete 3D'], null,
-  ['undo', 'Undo', 'action wide'],
-];
+const TOOLS = {
+  crops: [
+    ['paint', 'Paint'], ['erase', 'Erase'], ['pick', 'Pick'], ['new', 'New', 'action'], null,
+    ['cut', 'Cut'], ['relabel', 'Relabel'], null,
+    ['merge2d', 'Merge'], ['merge3d', 'Merge 3D'], null,
+    ['delete2d', 'Delete'], ['delete3d', 'Delete 3D'], null,
+    ['undo', 'Undo', 'action wide'],
+  ],
+  // a binary mask (verification): one foreground, so parts of it, not labels
+  binary: [
+    ['paint', 'Paint'], ['erase', 'Erase'], null,
+    ['erase2d', 'Erase part'], ['erase3d', 'Erase part 3D'], null,
+    ['fill2d', 'Fill hole', 'wide'], null,
+    ['undo', 'Undo', 'action wide'],
+  ],
+};
+const MASK_COLOR = [230, 60, 200];        // binary masks: one colour
 const HINTS = {
   paint: 'Paint the current label', erase: 'Erase to background',
   pick: 'Tap a mask to paint with its label', cut: 'Draw a line across a mask to split it',
@@ -48,12 +61,15 @@ const HINTS = {
   delete2d: 'Tap a mask to delete it in this plane',
   delete3d: 'Tap a mask to delete it in all planes',
   relabel: 'Tap a mask: it gets a new label in this plane',
+  erase2d: 'Tap a piece of the mask: erased in this plane',
+  erase3d: 'Tap a piece of the mask: erased with everything it touches in 3D',
+  fill2d: 'Tap inside a hole: filled with the mask around it',
 };
 
 // ------------------------------------------------------------------ state
 const state = {
   batchName: '', batch: null, statuses: {}, index: 0,
-  session: null, z: 0, img: null, lab: null, busy: false,
+  session: null, z: 0, img: null, lab: null, busy: false, mode: 'crops',
   tool: 'paint', label: 0, brush: 6, opacity: 0.45, contrast: 0,
   outline: false, protect: false, finger: false,
   view: { s: 1, x: 0, y: 0 }, pending: null, stroke: null, hover: null,
@@ -138,9 +154,15 @@ async function showBatches() {
   try {
     const names = (await store.list('batches')).filter((d) => d.dir).map((d) => d.name)
       .sort().reverse();
-    const batches = await Promise.all(names.map(async (name) => ({
-      name, info: await readJson(`batches/${name}/batch.json`),
-      statuses: await loadStatuses(name) })));
+    const found = await Promise.all(names.map(async (name) => {
+      try {
+        return { name, info: await readJson(`batches/${name}/batch.json`),
+                 statuses: await loadStatuses(name) };
+      } catch (e) {
+        return null;                         // not a batch (no batch.json): left out
+      }
+    }));
+    const batches = found.filter(Boolean);
     list.innerHTML = '';
     if (!batches.length) {
       list.innerHTML = '<div class="empty">No batches yet. Export one on the workstation ' +
@@ -166,6 +188,7 @@ function batchCard(b) {
   el.className = 'card';
   el.innerHTML = `
     <div class="name">${esc(String(b.info.source).replace(/ \([a-z0-9]+\)$/, ''))}</div>
+    ${b.info.mode === 'binary' ? '<div class="meta tag">mask verification</div>' : ''}
     <div class="meta">exported ${when.toLocaleDateString()} ${when.toLocaleTimeString([],
       { hour: '2-digit', minute: '2-digit' })} on ${esc(b.info.host)}</div>
     <div class="meta">${c.done} done, ${c.skipped} skipped, ${c.total - c.done - c.skipped}
@@ -180,6 +203,8 @@ function openBatch(b) {
   state.batchName = b.name;
   state.batch = b.info;
   state.statuses = b.statuses;
+  state.mode = b.info.mode === 'binary' ? 'binary' : 'crops';
+  buildTools();
   const first = b.info.crops.findIndex((w) => !b.statuses[w.name]);
   show('editor');
   openWindow(first >= 0 ? first : 0);
@@ -261,7 +286,8 @@ async function openWindow(i) {
   }
   const info = state.session.info;
   state.label = info.primary;
-  state.z = info.primary_z.length ? info.primary_z[info.primary_z.length >> 1] : 0;
+  state.z = state.mode === 'binary' ? 0
+          : info.primary_z.length ? info.primary_z[info.primary_z.length >> 1] : 0;
   state.pending = null;
   $('z').max = String(info.shape[0] - 1);
   plane.width = info.shape[2];
@@ -372,7 +398,7 @@ async function settle(make, failure) {
 $('btn-commit').onclick = () => {
   if (state.busy || !state.session) return;
   const signing = ensureSignedIn();          // in the tap: Safari allows the Google window
-  if (!state.session.changed() &&
+  if (state.mode !== 'binary' && !state.session.changed() &&
       !confirm('Nothing was changed. Commit this crop as correct?')) return;
   settle(() => {
     // one commit per crop: committing again replaces it (same name, files overwritten)
@@ -411,6 +437,7 @@ window.addEventListener('online', () => { if (store.signedIn) upload(); });
 
 // ------------------------------------------------------------------ drawing
 function color(id) {
+  if (state.mode === 'binary') return MASK_COLOR;
   let c = colors.get(id);
   if (!c) {
     // golden-ratio hues: neighbouring label IDs get distinct colours (HSL 85%, 55%)
@@ -534,7 +561,7 @@ function setZ(z) {
 
 function setLabel(id) {
   state.label = id;
-  $('label-id').textContent = String(id);
+  $('label-id').textContent = state.mode === 'binary' ? 'mask' : String(id);
   const c = color(id);
   $('swatch').style.background = `rgb(${c[0]},${c[1]},${c[2]})`;
   render();
@@ -543,7 +570,8 @@ function setLabel(id) {
 // ------------------------------------------------------------------ tools UI
 function buildTools() {
   const nav = $('tools');
-  for (const t of TOOLS) {
+  for (const el of [...nav.querySelectorAll('.tool, hr')]) el.remove();   // keep the Z pair
+  for (const t of TOOLS[state.mode]) {
     if (!t) { nav.appendChild(document.createElement('hr')); continue; }
     const [id, label, kind = ''] = t;
     const b = document.createElement('button');
@@ -635,6 +663,7 @@ function toolDown(p) {
     if (id) { setLabel(id); selectTool('paint', true); msg(`Painting with label ${id}`); }
     return;
   }
+  if (t === 'fill2d') { runOp(t, [[state.z, y, x]]); return; }
   if (!id) { msg('Tap on a mask', true); return; }
   if (t === 'merge2d' || t === 'merge3d') {
     if (!state.pending) {

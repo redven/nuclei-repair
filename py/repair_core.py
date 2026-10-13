@@ -9,6 +9,11 @@ a plane and hands it back, and runs the repair operations of
 repaired crop in the training format: the whole window in XY, the Z extent of
 the edited labels and of the window's primary label, with the same sidecar
 the workstation's repair widget writes.
+
+Binary batches (``batch.json`` ``"mode": "binary"``: a foreground mask to
+verify, e.g. a thresholded probability map) commit the whole tile, mask only.
+Undo stores only the voxels an edit changed, so large tiles fit in the iPad's
+memory.
 """
 
 from __future__ import annotations
@@ -23,7 +28,8 @@ import tifffile
 
 import label_repair as lr
 
-HISTORY = 20                      # undo steps kept
+HISTORY_STEPS = 50                # undo steps kept ...
+HISTORY_VOXELS = 8_000_000        # ... and changed voxels stored for them
 
 
 def _flat(array: np.ndarray, dtype) -> np.ndarray:
@@ -54,23 +60,28 @@ class Session:
         'merge2d': ('merge_labels_2d', 2), 'merge3d': ('merge_labels_3d', 2),
         'delete2d': ('delete_label', 1), 'delete3d': ('delete_label_3d', 1),
         'relabel': ('relabel_slice', 1), 'cut': ('reslice_label', -1),
+        # parts of a mask (this module): a binary mask has one label, so
+        # deleting the label would take the whole foreground
+        'erase2d': (None, 1), 'erase3d': (None, 1), 'fill2d': (None, 1),
     }
 
     def __init__(self, img_path, masks_path, window, batch) -> None:
         self.window = json.loads(window) if isinstance(window, str) else dict(window)
         self.batch = json.loads(batch) if isinstance(batch, str) else dict(batch)
+        self.binary = self.batch.get('mode') == 'binary'
         self.image = tifffile.imread(str(img_path))
         masks = tifffile.imread(str(masks_path))
         self.mask_dtype = masks.dtype
-        self.labels = masks.astype(np.int32)
+        self.labels = np.ascontiguousarray(masks, dtype=np.int32)
         if self.image.shape != self.labels.shape:
             raise ValueError(f'image {self.image.shape} and masks {self.labels.shape} differ')
         self.primary = int(self.window['primary_label'])
         self.edited: set = set()
         self.edited_z: set = set()
-        self.history: List[np.ndarray] = []
+        self.history: List[tuple] = []       # (plane or None, flat indices, old values)
         self.base = self.labels.copy()       # what "unchanged" means (see apply_commit)
         self.prior = None                    # commit this session continues from
+        self.created = None                  # its first commit time (binary tiles)
 
     def apply_commit(self, masks_path, bounds: Sequence[int], name: str) -> None:
         """Continue from an earlier commit of this window: its masks replace the
@@ -88,15 +99,20 @@ class Session:
         return not np.array_equal(self.labels, self.base)
 
     def snapshot(self):
-        """Draft of the edits: the masks (int32, flat) and the edit record (JSON)."""
+        """Draft of the edits: the masks (flat; one byte per voxel for binary
+        tiles) and the edit record (JSON)."""
+        dtype = np.uint8 if self.binary else np.int32
         state = {'edited': sorted(int(i) for i in self.edited),
-                 'edited_z': sorted(int(z) for z in self.edited_z), 'prior': self.prior}
-        return _flat(self.labels, np.int32), json.dumps(state)
+                 'edited_z': sorted(int(z) for z in self.edited_z), 'prior': self.prior,
+                 'dtype': np.dtype(dtype).name}
+        return _flat(self.labels, dtype), json.dumps(state)
 
     def restore(self, labels: Any, state: str) -> None:
         """Pick up a draft saved by :meth:`snapshot`."""
-        self.labels = _as_array(labels, np.int32, self.labels.shape)
         s = json.loads(state)
+        dtype = np.dtype(s.get('dtype', 'int32'))
+        self.labels = np.ascontiguousarray(_as_array(labels, dtype, self.labels.shape),
+                                           dtype=np.int32)
         self.edited = set(s['edited'])
         self.edited_z = set(s['edited_z'])
         self.history.clear()
@@ -132,24 +148,80 @@ class Session:
         return int(self.labels.max(initial=0)) + 1
 
     # ------------------------------------------------------------ editing
-    def _record(self, before: np.ndarray) -> List[int]:
-        """Push *before* to the undo history and note what changed."""
-        changed = before != self.labels
-        if not changed.any():
-            return []
-        self.history.append(before)
-        del self.history[:-HISTORY]
-        ids = (set(np.unique(before[changed]).tolist())
-               | set(np.unique(self.labels[changed]).tolist())) - {0}
+    def _push(self, plane, idx: np.ndarray, old: np.ndarray) -> None:
+        """Remember what an edit overwrote: flat indices (of the plane, or of the
+        volume) and their previous values -- not a copy of the volume."""
+        self.history.append((plane, idx.astype(np.int64), old))
+        while len(self.history) > HISTORY_STEPS or (
+                len(self.history) > 1 and sum(h[1].size for h in self.history) > HISTORY_VOXELS):
+            self.history.pop(0)
+
+    def _note(self, old: np.ndarray, new: np.ndarray, planes) -> List[int]:
+        ids = (set(np.unique(old).tolist()) | set(np.unique(new).tolist())) - {0}
         self.edited |= ids
-        self.edited_z |= set(np.where(changed.any(axis=(1, 2)))[0].tolist())
+        self.edited_z |= {int(z) for z in planes}
         return sorted(int(i) for i in ids)
 
     def set_plane(self, z: int, plane: Any) -> str:
         """Replace plane *z* by the app's painted version."""
-        before = self.labels.copy()
-        self.labels[int(z)] = _as_array(plane, np.int32, self.labels.shape[1:])
-        return json.dumps({'ok': True, 'edited': self._record(before)})
+        z = int(z)
+        new = _as_array(plane, np.int32, self.labels.shape[1:]).reshape(-1)
+        current = self.labels[z].reshape(-1)               # a view: labels is contiguous
+        idx = np.flatnonzero(current != new)
+        if not idx.size:
+            return json.dumps({'ok': True, 'edited': []})
+        old = current[idx].copy()
+        self._push(z, idx, old)
+        current[idx] = new[idx]
+        return json.dumps({'ok': True, 'edited': self._note(old, new[idx], [z])})
+
+    def _apply(self, new_labels: np.ndarray) -> List[int]:
+        """Take the result of an operation (a whole volume); keep only the change."""
+        new = np.ascontiguousarray(new_labels, dtype=np.int32).reshape(-1)
+        current = self.labels.reshape(-1)
+        idx = np.flatnonzero(current != new)
+        if not idx.size:
+            return []
+        old = current[idx].copy()
+        self._push(None, idx, old)
+        current[idx] = new[idx]
+        planes = np.unique(idx // (self.labels.shape[1] * self.labels.shape[2]))
+        return self._note(old, new[idx], planes)
+
+    def _part(self, op: str, z: int, y: int, x: int):
+        """Parts of a mask: erase the connected piece under the point (in its
+        plane or in 3D), or fill the enclosed background region under it."""
+        from scipy import ndimage
+
+        plane = self.labels[z]
+        if op == 'fill2d':
+            if plane[y, x] != 0:
+                return None, False, 'tap inside a hole (background)'
+            regions, _ = ndimage.label(plane == 0)
+            region = regions == regions[y, x]
+            if region[0].any() or region[-1].any() or region[:, 0].any() or region[:, -1].any():
+                return None, False, 'not a hole: this background reaches the edge'
+            ring = ndimage.binary_dilation(region) & ~region
+            values, counts = np.unique(plane[ring], return_counts=True)
+            value = int(values[np.argmax(counts)])            # the surrounding mask
+            new = self.labels.copy()
+            new[z][region] = value
+            return new, True, f'Filled a hole of {int(region.sum())} px'
+        value = int(plane[y, x])
+        if value == 0:
+            return None, False, 'tap on a mask'
+        if op == 'erase2d':
+            parts, _ = ndimage.label(plane == value)
+            region = parts == parts[y, x]
+            new = self.labels.copy()
+            new[z][region] = 0
+            return new, True, f'Erased {int(region.sum())} px in this plane'
+        parts, _ = ndimage.label(self.labels == value)
+        region = parts == parts[z, y, x]
+        new = self.labels.copy()
+        new[region] = 0
+        return new, True, (f'Erased {int(region.sum())} voxels in '
+                           f'{int(region.any(axis=(1, 2)).sum())} planes')
 
     def run(self, op: str, points: Any) -> str:
         """Run a repair operation; *points* are ``[[z, y, x], ...]`` voxels."""
@@ -165,18 +237,18 @@ class Session:
             pts = self._from_entry(pts)
             if len(pts) < 2:
                 return json.dumps({'ok': False, 'msg': 'draw the cut across a mask'})
-        fn = getattr(lr, name)
-        before = self.labels.copy()
-        if op == 'cut':
-            result = fn(self.labels, self.image, pts, inplace=False)
-        elif n_points == 2:
-            result = fn(self.labels, pts[0], pts[1], inplace=False)
+        if name is None:
+            new_labels, ok, msg = self._part(op, *pts[0])
         else:
-            result = fn(self.labels, pts[0], inplace=False)
-        new_labels, ok, msg = result[0], result[1], result[2]
-        if ok:
-            self.labels = np.asarray(new_labels, dtype=np.int32)
-        edited = self._record(before) if ok else []
+            fn = getattr(lr, name)
+            if op == 'cut':
+                result = fn(self.labels, self.image, pts, inplace=False)
+            elif n_points == 2:
+                result = fn(self.labels, pts[0], pts[1], inplace=False)
+            else:
+                result = fn(self.labels, pts[0], inplace=False)
+            new_labels, ok, msg = result[0], result[1], result[2]
+        edited = self._apply(new_labels) if ok else []
         return json.dumps({'ok': bool(ok), 'msg': str(msg), 'edited': edited})
 
     def _from_entry(self, pts: List[tuple]) -> List[tuple]:
@@ -202,13 +274,19 @@ class Session:
     def undo(self) -> bool:
         if not self.history:
             return False
-        self.labels = self.history.pop()
+        plane, idx, old = self.history.pop()
+        target = self.labels.reshape(-1) if plane is None else self.labels[plane].reshape(-1)
+        target[idx] = old
         return True
 
     # ------------------------------------------------------------ commit
     def commit_bounds(self) -> List[int]:
         """Window-relative bounds of the crop to commit: XY the whole window,
-        Z the planes of the edited labels and the primary label."""
+        Z the planes of the edited labels and the primary label (binary: the
+        whole tile -- committing verifies all of it)."""
+        nz, ny, nx = self.labels.shape
+        if self.binary:
+            return [0, nz, 0, ny, 0, nx]
         keep = np.isin(self.labels, sorted(self.edited | {self.primary}))
         zs = set(np.where(keep.any(axis=(1, 2)))[0].tolist()) | self.edited_z
         if not zs:
@@ -229,7 +307,10 @@ class Session:
         edited = sorted(i for i in self.edited if i in present)   # not painted-then-erased
         ids = [self.primary] + [i for i in edited if i != self.primary]
         created = when
-        if self.prior:                       # committed before: the same crop, replaced
+        if self.binary:                      # a tile: named after it, so always replaced
+            name = self.window['name']
+            created = datetime.fromisoformat(self.created) if self.created else when
+        elif self.prior:                     # committed before: the same crop, replaced
             name = self.prior
             try:
                 _, day, clock = name.split('_')[:3]
@@ -257,12 +338,19 @@ class Session:
         }
         out = Path(out_dir)
         out.mkdir(parents=True, exist_ok=True)
-        files = [f'{name}_img.tif', f'{name}_masks.tif', f'{name}_meta.json']
-        tifffile.imwrite(out / files[0], img, photometric='minisblack')
-        tifffile.imwrite(out / files[1], masks.astype(mask_dtype), photometric='minisblack')
-        (out / files[2]).write_text(json.dumps(meta, indent=2), encoding='utf-8')
+        if self.binary:                      # the image stays on the workstation
+            meta['mode'] = 'binary'
+            files = [f'{name}_masks.tif', f'{name}_meta.json']
+            tifffile.imwrite(out / files[0], (masks > 0).astype(np.uint8),
+                             photometric='minisblack', compression='zlib')
+        else:
+            files = [f'{name}_img.tif', f'{name}_masks.tif', f'{name}_meta.json']
+            tifffile.imwrite(out / files[0], img, photometric='minisblack')
+            tifffile.imwrite(out / files[1], masks.astype(mask_dtype), photometric='minisblack')
+        (out / files[-1]).write_text(json.dumps(meta, indent=2), encoding='utf-8')
         # the committed state is the new start; committing again replaces this crop
         self.prior = name
+        self.created = meta['created']
         self.rebase()
         return json.dumps({'name': name, 'files': files, 'meta': meta})
 
